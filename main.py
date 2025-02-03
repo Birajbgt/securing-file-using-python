@@ -5,7 +5,6 @@ import sqlite3
 import tkinter as tk
 from tkinter import Label, filedialog, messagebox, simpledialog
 
-import cv2
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -107,9 +106,10 @@ def download_encrypted_file():
         cursor.execute("SELECT file_data FROM files WHERE id=?", (file_id,))
         encrypted_data = cursor.fetchone()[0]
 
-        save_path = filedialog.asksaveasfilename(defaultextension="",
-                                                 initialfile=file_name,
-                                                 filetypes=[("All Files", "*.*")])
+        encrypted_filename = file_name + ".enc"  # Save as .enc file
+        save_path = filedialog.asksaveasfilename(defaultextension=".enc",
+                                                 initialfile=encrypted_filename,
+                                                 filetypes=[("Encrypted Files", "*.enc")])
         if save_path:
             with open(save_path, "wb") as file:
                 file.write(encrypted_data)
@@ -119,62 +119,39 @@ def download_encrypted_file():
         file_button = tk.Button(download_window, text=file_name, command=lambda id=file_id, name=file_name: save_encrypted_file(id, name))
         file_button.pack(pady=5)
 
-# Function to access file inside the app
-def access_file():
-    cursor.execute("SELECT id, file_name, file_type FROM files")
-    files = cursor.fetchall()
+# Function to decrypt .enc file (When user tries to open it)
+def decrypt_enc_file():
+    file_path = filedialog.askopenfilename(filetypes=[("Encrypted Files", "*.enc")])
+    if not file_path:
+        return  
 
-    if not files:
-        messagebox.showinfo("No Files", "No files found in the database.")
+    pin = simpledialog.askstring("Enter PIN", "Enter the PIN to decrypt this file:", show="*")
+    if not pin:
+        messagebox.showwarning("PIN Required", "You must enter a PIN.")
         return
 
-    access_window = tk.Toplevel(root)
-    access_window.title("Access File")
-    access_window.geometry("500x400")
+    # Read encrypted data
+    with open(file_path, "rb") as file:
+        encrypted_data = file.read()
 
-    def decrypt_and_show(file_id, file_name, file_type):
-        cursor.execute("SELECT file_data, salt FROM files WHERE id=?", (file_id,))
-        result = cursor.fetchone()
-        encrypted_data, salt = result
-
-        # Ask for the PIN
-        pin = simpledialog.askstring("Enter PIN", "Enter the PIN to access this file:", show="*")
-        if not pin:
-            messagebox.showwarning("PIN Required", "You must enter the correct PIN.")
-            return
-
+    cursor.execute("SELECT salt FROM files WHERE file_name=?", (os.path.basename(file_path).replace(".enc", ""),))
+    result = cursor.fetchone()
+    
+    if result:
+        salt = result[0]
         decrypted_data = decrypt_file(encrypted_data, pin, salt)
-        if decrypted_data is None:
-            messagebox.showerror("Error", "Decryption failed! Incorrect PIN.")
-            return
-
-        # Display content in the app
-        if file_type in [".png", ".jpg", ".jpeg", ".gif"]:
-            # Show image
-            image = Image.open(io.BytesIO(decrypted_data))
-            img_window = tk.Toplevel(access_window)
-            img_window.title(f"Image: {file_name}")
-            img = ImageTk.PhotoImage(image)
-            label = Label(img_window, image=img)
-            label.image = img
-            label.pack()
-
-        elif file_type in [".txt", ".csv"]:
-            # Show text
-            text_window = tk.Toplevel(access_window)
-            text_window.title(f"Text File: {file_name}")
-            text_window.geometry("600x400")
-            text_box = tk.Text(text_window, wrap=tk.WORD)
-            text_box.insert(tk.END, decrypted_data.decode(errors="ignore"))
-            text_box.pack(expand=True, fill=tk.BOTH)
-
-        elif file_type in [".mp4", ".mp3"]:
-            # Show message (Playback requires external software)
-            messagebox.showinfo("Media File", "This is a media file. Save and play it on your media player.")
-
-    for file_id, file_name, file_type in files:
-        file_button = tk.Button(access_window, text=file_name, command=lambda id=file_id, name=file_name, type=file_type: decrypt_and_show(id, name, type))
-        file_button.pack(pady=5)
+        
+        if decrypted_data:
+            # Save decrypted file for viewing
+            decrypted_path = file_path.replace(".enc", "")
+            with open(decrypted_path, "wb") as file:
+                file.write(decrypted_data)
+            
+            messagebox.showinfo("Success", f"File decrypted successfully!\nSaved as: {decrypted_path}")
+        else:
+            messagebox.showerror("Error", "Incorrect PIN. Decryption failed.")
+    else:
+        messagebox.showerror("Error", "This file is not in the database.")
 
 # Create GUI window
 root = tk.Tk()
@@ -189,9 +166,9 @@ upload_button.pack(pady=10)
 download_button = tk.Button(root, text="Download Encrypted File", command=download_encrypted_file, padx=20, pady=10)
 download_button.pack(pady=10)
 
-# Access File button (Decrypt inside the app)
-access_button = tk.Button(root, text="Access File with PIN", command=access_file, padx=20, pady=10)
-access_button.pack(pady=10)
+# Open & Decrypt Encrypted File
+decrypt_button = tk.Button(root, text="Open Encrypted File", command=decrypt_enc_file, padx=20, pady=10)
+decrypt_button.pack(pady=10)
 
 # Label to display status
 label = tk.Label(root, text="Allowed: PDF, DOCX, PNG, JPG, JPEG, GIF, MP4, MP3, TXT, CSV", wraplength=350)
